@@ -100,3 +100,12 @@ def test_reset_password_flow(admin, app, world):
     u = Api(app)
     assert u.login(email, "StaffPass2026").status_code == 401
     assert u.login(email, tmp).status_code == 200 and u.user["must_change_password"] is True
+
+
+def test_first_admin_setup_is_closed_once_users_exist(world):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app, base_url="http://testserver")
+    assert c.get("/api/auth/setup-status").json()["needed"] is False
+    r = c.post("/api/auth/setup", json={"name": "Intruder", "email": "intruder@bonjour-test.com", "password": "Password123", "setup_key": "anything"})
+    assert r.status_code == 409

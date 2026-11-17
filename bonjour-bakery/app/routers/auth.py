@@ -1,14 +1,16 @@
+import hmac
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies.auth import COOKIE, CSRF_COOKIE, current_principal, _load
 from app.middleware.security import limiter
 from app.models import User, Role, Customer, AuthSession, PasswordReset, Notification
-from app.schemas.common import LoginIn, RegisterIn, PasswordChangeIn, ForgotIn, ResetIn, ProfileIn, AddressIn
+from app.schemas.common import SetupIn, LoginIn, RegisterIn, PasswordChangeIn, ForgotIn, ResetIn, ProfileIn, AddressIn
 from app.models import CustomerAddress
 from app.security import (verify_password, hash_password, password_problem, new_token, token_hash, in_hours, now)
 from app.serializers import user_out, customer_out
@@ -42,6 +44,47 @@ def _me(db, user):
         c = db.query(Customer).filter(Customer.user_id == user.id).first()
         d["customer"] = customer_out(c) if c else None
     return d
+
+
+@router.get("/setup-status")
+def setup_status(db: Session = Depends(get_db)):
+    """Tells the sign-in page whether the one-time first-admin setup is still available."""
+    empty = db.query(User).count() == 0
+    return {"needed": empty, "configured": bool(get_settings().setup_key)}
+
+
+@router.post("/setup", status_code=201)
+def first_admin_setup(body: SetupIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    """One-time creation of the first Super Administrator. Requires SETUP_KEY and works only while the
+    users table is empty; afterwards it is permanently closed."""
+    from app import bootstrap
+    cfg = get_settings()
+    if not limiter.check(f"setup:{_client_ip(request)}", 6, 900):
+        raise HTTPException(429, "Too many attempts. Please wait and try again.")
+    db.execute(text("SELECT pg_advisory_xact_lock(727002)"))  # serialise concurrent setup attempts
+    if db.query(User).count() > 0:
+        raise HTTPException(409, "Setup is already complete. Sign in instead.")
+    if not cfg.setup_key:
+        raise HTTPException(403, "Setup is not enabled. Set the SETUP_KEY environment variable on the server and redeploy.")
+    if not hmac.compare_digest(body.setup_key.strip().encode(), cfg.setup_key.strip().encode()):
+        raise HTTPException(403, "Incorrect setup key.")
+    problem = password_problem(body.password)
+    if problem:
+        raise HTTPException(400, problem)
+    role = db.query(Role).filter(Role.key == "super_admin").first()
+    if role is None:
+        bootstrap.sync_permissions_and_roles(db)
+        db.flush()
+        role = db.query(Role).filter(Role.key == "super_admin").one()
+    user = User(email=body.email.strip().lower(), full_name=body.name.strip(), password_hash=hash_password(body.password), role_id=role.id,
+                employee_id="OWNER-001", job_title="Owner")
+    db.add(user)
+    db.flush()
+    user.last_login = now()
+    csrf = _start_session(db, request, response, user)
+    audit.log(db, user, "first_admin_setup", "user", user.id, request=request)
+    db.commit()
+    return {"user": _me(db, user), "csrf_token": csrf}
 
 
 @router.post("/login")

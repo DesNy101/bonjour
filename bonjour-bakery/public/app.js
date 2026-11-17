@@ -39,6 +39,7 @@ async function route() {
       case "forgot": return Store.authScreen(el, "forgot");
       case "reset": return Store.authScreen(el, "reset", { token: r.qs.get("token") || "" });
       case "staff": return Store.authScreen(el, "staff");
+      case "setup": return Store.authScreen(el, "setup");
       default:
         if (STAFF_IDS.has(r.name)) { location.hash = "#/staff"; return; }
         return Store.home(el);

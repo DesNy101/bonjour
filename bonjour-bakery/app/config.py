@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     admin_name: str = "Bonjour Administrator"
     admin_email: str = ""
     admin_password: str = ""
+    setup_key: str = ""  # one-time key that lets the very first Super Admin register (only works while no users exist)
     session_hours: int = 12
     cookie_secure: str = "auto"
     paystack_secret_key: str = ""

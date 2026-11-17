@@ -188,20 +188,23 @@ export function authScreen(root, mode, extra = {}) {
     staff: { t: "Staff sign in", f: [["email", "Work email", "email"], ["password", "Password", "password"]], b: "Sign in" },
     register: { t: "Create your account", f: [["name", "Full name", "text"], ["email", "Email", "email"], ["phone", "Phone number", "tel"], ["password", "Password (min 8, letters & numbers)", "password"]], b: "Create account" },
     forgot: { t: "Reset your password", f: [["email", "Email", "email"]], b: "Send reset link" },
+    setup: { t: "First-time admin setup", f: [["name", "Your full name", "text"], ["email", "Admin email", "email"], ["password", "Password (min 8, letters & numbers)", "password"], ["setup_key", "Setup key", "password"]], b: "Create admin account" },
     reset: { t: "Choose a new password", f: [["new_password", "New password", "password"]], b: "Update password" },
   }[mode];
   mount(root, h`<div class="auth">${art}<div class="auth-form"><form class="auth-card" id="auth-form" novalidate><div><a href="#/" class="small">← Back to the bakery</a></div><h1 style="margin-top:12px">${forms.t}</h1>
-    <div class="stack"><div class="err hidden" id="auth-err"></div><div class="ok hidden" id="auth-ok"></div>${forms.f.map(([n, l, t]) => h`<label class="f">${l}<input name="${n}" type="${t}" required autocomplete="${n === "password" ? (mode === "register" ? "new-password" : "current-password") : n === "email" ? "email" : "on"}"></label>`)}
+    <div class="stack"><div class="err hidden" id="auth-err"></div><div class="ok hidden" id="auth-ok"></div>${forms.f.map(([n, l, t]) => h`<label class="f">${l}<input name="${n}" type="${t}" required autocomplete="${n === "setup_key" ? "off" : n === "password" ? (mode === "register" || mode === "setup" ? "new-password" : "current-password") : n === "email" ? "email" : "on"}"></label>`)}
     <button class="btn primary block" id="auth-btn">${forms.b}</button>
-    ${mode === "login" ? h`<div class="row between small"><a href="#/forgot">Forgot password?</a><a href="#/register">Create account</a></div>` : mode === "staff" ? h`<div class="small"><a href="#/forgot">Forgot password?</a></div>` : mode === "register" ? h`<div class="small">Already registered? <a href="#/login">Sign in</a></div>` : h`<div class="small"><a href="#/login">Back to sign in</a></div>`}
+    ${mode === "login" ? h`<div class="row between small"><a href="#/forgot">Forgot password?</a><a href="#/register">Create account</a></div>` : mode === "staff" ? h`<div class="small"><a href="#/forgot">Forgot password?</a></div><div class="small hidden" id="setup-link">No admin account yet? <a href="#/setup">Create the first admin</a></div>` : mode === "register" ? h`<div class="small">Already registered? <a href="#/login">Sign in</a></div>` : h`<div class="small"><a href="#/login">Back to sign in</a></div>`}
     ${mode === "login" ? h`<div class="small muted">Staff member? <a href="#/staff">Staff sign in</a></div>` : ""}</div></form></div></div>`);
+  if (mode === "staff") api("/auth/setup-status").then((s) => { if (s.needed) $("#setup-link")?.classList.remove("hidden"); }).catch(() => {});
+  if (mode === "setup") api("/auth/setup-status").then((s) => { if (!s.needed) { $("#auth-err").textContent = "Setup is already complete. Please sign in."; $("#auth-err").classList.remove("hidden"); $("#auth-btn").disabled = true; } }).catch(() => {});
   $("#auth-form").onsubmit = async (e) => {
     e.preventDefault(); const err = $("#auth-err"), ok = $("#auth-ok"); err.classList.add("hidden"); ok.classList.add("hidden");
     const body = Object.fromEntries(new FormData(e.target).entries()); const btn = $("#auth-btn");
     try {
       if (mode === "forgot") { const r = await busy(btn, () => api("/auth/forgot-password", { method: "POST", body })); ok.textContent = r.message + (r.note ? " " + r.note : ""); ok.className = "badge green"; ok.style.padding = "10px"; if (r.dev_reset_token) { ok.innerHTML += `<br>Dev mode reset link: <a href="#/reset/${esc(r.dev_reset_token)}">open</a>`; } return; }
       if (mode === "reset") { await busy(btn, () => api("/auth/reset-password", { method: "POST", body: { token: extra.token, new_password: body.new_password } })); toast("Password updated. Please sign in.", "ok"); location.hash = "#/login"; return; }
-      const r = await busy(btn, () => api(mode === "register" ? "/auth/register" : "/auth/login", { method: "POST", body }));
+      const r = await busy(btn, () => api(mode === "register" ? "/auth/register" : mode === "setup" ? "/auth/setup" : "/auth/login", { method: "POST", body }));
       state.user = r.user; events.dispatchEvent(new Event("signedin"));
       if (mode === "staff" && !r.user.is_staff) { await api("/auth/logout", { method: "POST" }); state.user = null; throw new Error("This is not a staff account. Use customer sign in."); }
       location.hash = r.user.is_staff ? "#/app" : (state.cart.length ? "#/checkout" : "#/account");

@@ -17,6 +17,8 @@ alembic upgrade head            # creates all tables
 uvicorn app.main:app --reload   # http://localhost:8000
 ```
 
+**First admin (recommended):** set `SETUP_KEY` to a long secret, deploy, then open `/#/setup`, enter your name, email, password and the setup key. This works only while the database has no users and closes permanently once the first admin exists; then remove `SETUP_KEY`. (Alternatively set `ADMIN_EMAIL`/`ADMIN_PASSWORD` and the admin is created on startup.)
+
 On startup the app idempotently seeds permissions, the 12 roles, production stages, expense/product categories and the Super Admin from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Change that password after first sign-in. `python -m app.create_admin` creates/resets an admin manually.
 
 ### Demo data (kept separate from live data)

@@ -19,6 +19,13 @@ class RegisterIn(Base):
     password: str = Field(min_length=8, max_length=200)
 
 
+class SetupIn(Base):
+    name: str = Field(min_length=2, max_length=150)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=200)
+    setup_key: str = Field(min_length=1, max_length=300)
+
+
 class PasswordChangeIn(Base):
     current_password: str
     new_password: str = Field(min_length=8, max_length=200)
