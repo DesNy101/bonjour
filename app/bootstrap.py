@@ -52,8 +52,44 @@ def seed_reference_data(db: Session):
         db.add(Branch(code="YNG", name="Yenagoa (Main)", address="Yenagoa", state="Bayelsa", lga="Yenagoa", opened_on=date.today()))
 
 
+def reset_admin(db: Session) -> bool:
+    """Recovery path for hosts without a shell: with ADMIN_RESET=true, make ADMIN_EMAIL a Super Administrator
+    with ADMIN_PASSWORD (creating or updating the account, unlocking it and signing out its old sessions).
+    Remove ADMIN_RESET (and ADMIN_PASSWORD) after one successful deploy."""
+    from app.models import AuthSession
+    cfg = get_settings()
+    if cfg.admin_reset.strip().lower() not in ("true", "1", "yes"):
+        return False
+    if not cfg.admin_email or not cfg.admin_password:
+        log.error("ADMIN_RESET is on but ADMIN_EMAIL / ADMIN_PASSWORD are not both set.")
+        return True
+    problem = password_problem(cfg.admin_password)
+    if problem:
+        log.error("ADMIN_RESET: ADMIN_PASSWORD rejected: %s", problem)
+        return True
+    role = db.query(Role).filter(Role.key == "super_admin").one()
+    email = cfg.admin_email.strip().lower()
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        user = User(email=email, full_name=cfg.admin_name, password_hash=hash_password(cfg.admin_password), role_id=role.id, employee_id=None, job_title="Owner")
+        db.add(user)
+        log.warning("ADMIN_RESET: created Super Administrator %s. Remove ADMIN_RESET from the environment now.", email)
+    else:
+        user.password_hash = hash_password(cfg.admin_password)
+        user.role_id = role.id
+        user.is_active = True
+        user.failed_logins, user.locked_until = 0, None
+        db.flush()
+        for s in db.query(AuthSession).filter(AuthSession.user_id == user.id, AuthSession.revoked == False):  # noqa: E712
+            s.revoked = True
+        log.warning("ADMIN_RESET: reset password and access for %s. Remove ADMIN_RESET from the environment now.", email)
+    return True
+
+
 def ensure_admin(db: Session):
     cfg = get_settings()
+    if reset_admin(db):
+        return
     if db.query(User).count() > 0:
         return
     if not cfg.admin_email or not cfg.admin_password:

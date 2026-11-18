@@ -109,3 +109,26 @@ def test_first_admin_setup_is_closed_once_users_exist(world):
     assert c.get("/api/auth/setup-status").json()["needed"] is False
     r = c.post("/api/auth/setup", json={"name": "Intruder", "email": "intruder@bonjour-test.com", "password": "Password123", "setup_key": "anything"})
     assert r.status_code == 409
+
+
+def test_admin_reset_flag_resets_password_and_unlocks(world, monkeypatch):
+    from app import bootstrap
+    from app.config import get_settings
+    from app.database import SessionLocal
+    from app.models import User
+    from app.security import verify_password
+    s = get_settings()
+    monkeypatch.setattr(s, "admin_reset", "true")
+    monkeypatch.setattr(s, "admin_email", "reset.owner@bonjour-test.com")
+    monkeypatch.setattr(s, "admin_password", "BrandNewPass123")
+    with SessionLocal() as db:
+        bootstrap.ensure_admin(db)
+        db.commit()
+        u = db.query(User).filter(User.email == "reset.owner@bonjour-test.com").one()
+        assert u.role.key == "super_admin" and verify_password("BrandNewPass123", u.password_hash)
+        u.failed_logins = 4
+        monkeypatch.setattr(s, "admin_password", "AnotherPass456")
+        bootstrap.ensure_admin(db)
+        db.commit()
+        db.refresh(u)
+        assert verify_password("AnotherPass456", u.password_hash) and u.failed_logins == 0
